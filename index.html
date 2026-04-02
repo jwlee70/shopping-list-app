@@ -228,10 +228,14 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
-    const STORAGE_KEY = 'shopping_list_v1';
+    const SUPABASE_URL = 'https://mmohippvxmysjuinlhfp.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1tb2hpcHB2eG15c2p1aW5saGZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxMDgxODcsImV4cCI6MjA5MDY4NDE4N30.u4DZCYoD1n-YBkaCacFRpRMHAfvAN142t7a4hEKuByE';
 
-    let items = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    let items = [];
 
     const listEl = document.getElementById('list');
     const inputEl = document.getElementById('input');
@@ -240,8 +244,9 @@
     const progressLabel = document.getElementById('progress-label');
     const clearBtn = document.getElementById('clear-btn');
 
-    function save() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    function setLoading(loading) {
+      addBtn.disabled = loading;
+      inputEl.disabled = loading;
     }
 
     function updateProgress() {
@@ -295,45 +300,82 @@
       updateProgress();
     }
 
-    function addItem() {
+    async function loadItems() {
+      const { data, error } = await db
+        .from('shopping_item')
+        .select('*')
+        .order('created_at', { ascending: true });
+
+      if (error) { console.error('불러오기 실패:', error); return; }
+      items = data;
+      render();
+    }
+
+    async function addItem() {
       const name = inputEl.value.trim();
       if (!name) return;
 
-      items.push({ id: Date.now(), name, done: false });
-      save();
+      setLoading(true);
+      const { data, error } = await db
+        .from('shopping_item')
+        .insert({ name, done: false })
+        .select()
+        .single();
+      setLoading(false);
+
+      if (error) { console.error('추가 실패:', error); return; }
+      items.push(data);
       render();
       inputEl.value = '';
       inputEl.focus();
     }
 
-    function toggle(id) {
-      items = items.map(i => i.id === id ? { ...i, done: !i.done } : i);
-      save();
-
-      // 클래스만 토글 (전체 리렌더 없이)
-      const li = listEl.querySelector(`[data-id="${id}"]`);
+    async function toggle(id) {
       const item = items.find(i => i.id === id);
-      li.classList.toggle('done', item.done);
-      li.querySelector('input[type="checkbox"]').checked = item.done;
+      const newDone = !item.done;
+
+      const { error } = await db
+        .from('shopping_item')
+        .update({ done: newDone })
+        .eq('id', id);
+
+      if (error) { console.error('업데이트 실패:', error); return; }
+
+      items = items.map(i => i.id === id ? { ...i, done: newDone } : i);
+
+      const li = listEl.querySelector(`[data-id="${id}"]`);
+      li.classList.toggle('done', newDone);
+      li.querySelector('input[type="checkbox"]').checked = newDone;
       updateProgress();
     }
 
-    function remove(id) {
+    async function remove(id) {
+      const { error } = await db
+        .from('shopping_item')
+        .delete()
+        .eq('id', id);
+
+      if (error) { console.error('삭제 실패:', error); return; }
       items = items.filter(i => i.id !== id);
-      save();
       render();
     }
 
-    clearBtn.addEventListener('click', () => {
+    clearBtn.addEventListener('click', async () => {
+      const doneIds = items.filter(i => i.done).map(i => i.id);
+      const { error } = await db
+        .from('shopping_item')
+        .delete()
+        .in('id', doneIds);
+
+      if (error) { console.error('완료 항목 삭제 실패:', error); return; }
       items = items.filter(i => !i.done);
-      save();
       render();
     });
 
     addBtn.addEventListener('click', addItem);
     inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') addItem(); });
 
-    render();
+    loadItems();
   </script>
 </body>
 </html>
